@@ -1,0 +1,35 @@
+# Lock file - not committed for libraries (only for deployed applications)
+mix.lock
+
+# Build artifacts
+/_build/
+/cover/
+/deps/
+/doc/
+/.fetch
+
+# Environment
+/.env
+.env.*
+!.env.example
+
+# Release
+/rel/
+/releases/
+*.ez
+
+# Dialyzer
+/priv/plts/
+*.plt
+*.plt.hash
+
+# Editor
+/.elixir_ls/
+/.idea/
+.vscode/
+
+# macOS
+.DS_Store
+
+# Test coverage
+/cover/
