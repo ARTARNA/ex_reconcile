@@ -127,7 +127,7 @@ defmodule ExReconcileTest do
   # ---------------------------------------------------------------------------
 
   describe "Result.summary/1" do
-    test "totals are consistent" do
+    test "totals are consistent without splits" do
       bank = [
         t(amount: 100, date: ~D[2024-01-01]),
         t(amount: 200, date: ~D[2024-01-02]),
@@ -145,6 +145,56 @@ defmodule ExReconcileTest do
       assert summary.total_left == length(bank)
       assert summary.total_right == length(ledger)
       assert summary.matched + summary.discrepancies + summary.unmatched_left == length(bank)
+    end
+
+    test "totals are consistent when splits are present" do
+      # bank: one entry of 300; ledger: three entries of 100 each
+      bank = [t(amount: 300, date: ~D[2024-01-10])]
+
+      ledger = [
+        t(amount: 100, date: ~D[2024-01-10]),
+        t(amount: 100, date: ~D[2024-01-11]),
+        t(amount: 100, date: ~D[2024-01-12])
+      ]
+
+      result = ExReconcile.reconcile(bank, ledger, match_on: [:amount], allow_splits: true)
+      summary = ExReconcile.Result.summary(result)
+
+      assert summary.splits == 1
+      assert summary.total_left == length(bank)
+      assert summary.total_right == length(ledger)
+    end
+  end
+
+  describe "reconcile/3 — split matching" do
+    test "bulk payment split across invoices is resolved" do
+      bank = [t(id: "BULK", amount: 450, date: ~D[2024-02-01])]
+
+      ledger = [
+        t(id: "INV-1", amount: 150, date: ~D[2024-01-28]),
+        t(id: "INV-2", amount: 300, date: ~D[2024-01-29])
+      ]
+
+      result = ExReconcile.reconcile(bank, ledger, match_on: [:amount], allow_splits: true)
+
+      assert length(result.splits) == 1
+      assert result.unmatched_left == []
+      assert result.unmatched_right == []
+
+      {anchor, parts} = hd(result.splits)
+      assert anchor.id == "BULK"
+      assert Enum.map(parts, & &1.id) |> Enum.sort() == ["INV-1", "INV-2"]
+    end
+
+    test "format/2 includes splits section when splits exist" do
+      bank = [t(amount: 300)]
+      ledger = [t(amount: 100), t(amount: 200)]
+
+      result = ExReconcile.reconcile(bank, ledger, match_on: [:amount], allow_splits: true)
+      output = ExReconcile.format(result)
+
+      assert output =~ "Splits"
+      assert output =~ "CLEAN"
     end
   end
 end

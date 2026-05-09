@@ -10,6 +10,7 @@ defmodule ExReconcile.ConfigTest do
       assert config.amount_tolerance == 0
       assert config.date_tolerance == 0
       assert config.description_match == :case_insensitive
+      assert config.allow_splits == false
     end
 
     test "accepts valid match_on fields" do
@@ -35,6 +36,16 @@ defmodule ExReconcile.ConfigTest do
     test "accepts description_match :ignore" do
       config = Config.new(description_match: :ignore)
       assert config.description_match == :ignore
+    end
+
+    test "accepts allow_splits: true" do
+      config = Config.new(allow_splits: true)
+      assert config.allow_splits == true
+    end
+
+    test "accepts allow_splits: false explicitly" do
+      config = Config.new(allow_splits: false)
+      assert config.allow_splits == false
     end
   end
 
@@ -72,6 +83,12 @@ defmodule ExReconcile.ConfigTest do
     test "raises on other unknown description_match value" do
       assert_raise ArgumentError, ~r/description_match/, fn ->
         Config.new(description_match: :fuzzy)
+      end
+    end
+
+    test "raises when allow_splits is not a boolean" do
+      assert_raise ArgumentError, ~r/allow_splits/, fn ->
+        Config.new(allow_splits: "yes")
       end
     end
   end

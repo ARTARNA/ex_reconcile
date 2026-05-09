@@ -24,6 +24,7 @@ defmodule ExReconcile.Diff do
     sections = [
       render_header(title, summary),
       if(show_matched, do: render_matched(result.matched), else: nil),
+      render_splits(result.splits),
       render_discrepancies(result.discrepancies),
       render_unmatched("Unmatched (left)", result.unmatched_left),
       render_unmatched("Unmatched (right)", result.unmatched_right)
@@ -39,14 +40,17 @@ defmodule ExReconcile.Diff do
   # ---------------------------------------------------------------------------
 
   defp render_header(title, summary) do
-    status = if summary.discrepancies == 0 and summary.unmatched_left == 0 and summary.unmatched_right == 0,
-      do: "CLEAN",
-      else: "NEEDS ATTENTION"
+    status =
+      if summary.discrepancies == 0 and summary.unmatched_left == 0 and
+           summary.unmatched_right == 0,
+         do: "CLEAN",
+         else: "NEEDS ATTENTION"
 
     """
     == #{title} [#{status}] ==
 
       Matched           #{pad(summary.matched)}
+      Splits            #{pad(summary.splits)}
       Discrepancies     #{pad(summary.discrepancies)}
       Unmatched (left)  #{pad(summary.unmatched_left)}
       Unmatched (right) #{pad(summary.unmatched_right)}
@@ -57,11 +61,45 @@ defmodule ExReconcile.Diff do
   defp render_matched([]), do: nil
 
   defp render_matched(pairs) do
-    lines = Enum.map(pairs, fn {l, r} ->
-      "  + #{Transaction.label(l)}  <->  #{Transaction.label(r)}"
-    end)
+    lines =
+      Enum.map(pairs, fn {l, r} ->
+        "  + #{Transaction.label(l)}  <->  #{Transaction.label(r)}"
+      end)
 
     "\n== Matched ==\n" <> Enum.join(lines, "\n") <> "\n"
+  end
+
+  defp render_splits([]), do: nil
+
+  defp render_splits(splits) do
+    items =
+      splits
+      |> Enum.with_index(1)
+      |> Enum.map(fn {split, idx} ->
+        case split do
+          {anchor, parts} when is_list(parts) ->
+            part_lines = Enum.map(parts, fn p -> "      - #{Transaction.label(p)}" end)
+
+            """
+              #{idx}. [1:#{length(parts)}]
+                Left:  #{Transaction.label(anchor)}
+                Right:
+            #{Enum.join(part_lines, "\n")}
+            """
+
+          {parts, anchor} when is_list(parts) ->
+            part_lines = Enum.map(parts, fn p -> "      - #{Transaction.label(p)}" end)
+
+            """
+              #{idx}. [#{length(parts)}:1]
+                Left:
+            #{Enum.join(part_lines, "\n")}
+                Right: #{Transaction.label(anchor)}
+            """
+        end
+      end)
+
+    "\n== Splits ==\n" <> Enum.join(items, "\n")
   end
 
   defp render_discrepancies([]), do: nil

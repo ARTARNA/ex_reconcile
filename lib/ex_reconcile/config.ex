@@ -12,6 +12,7 @@ defmodule ExReconcile.Config do
   | `:amount_tolerance` | `number` | `0` | Maximum absolute difference in amount that still counts as a match. |
   | `:date_tolerance` | `non_neg_integer` | `0` | Maximum absolute difference in days for date matching. |
   | `:description_match` | `:case_insensitive \\| :ignore` | `:case_insensitive` | How descriptions are compared when checking for discrepancies or matching. |
+  | `:allow_splits` | `boolean` | `false` | When `true`, after 1:1 matching, attempt to match a single transaction against a group of transactions on the other side whose amounts sum to it (many-to-one / split payments). |
 
   ## Valid `match_on` fields
 
@@ -23,10 +24,10 @@ defmodule ExReconcile.Config do
   ## Examples
 
       iex> ExReconcile.Config.new(match_on: [:id], amount_tolerance: 0)
-      %ExReconcile.Config{match_on: [:id], amount_tolerance: 0, date_tolerance: 0, description_match: :case_insensitive}
+      %ExReconcile.Config{match_on: [:id], amount_tolerance: 0, date_tolerance: 0, description_match: :case_insensitive, allow_splits: false}
 
       iex> ExReconcile.Config.new(match_on: [:amount, :date], date_tolerance: 2)
-      %ExReconcile.Config{match_on: [:amount, :date], date_tolerance: 2, amount_tolerance: 0, description_match: :case_insensitive}
+      %ExReconcile.Config{match_on: [:amount, :date], date_tolerance: 2, amount_tolerance: 0, description_match: :case_insensitive, allow_splits: false}
   """
 
   @valid_match_fields [:id, :amount, :date, :description]
@@ -36,7 +37,8 @@ defmodule ExReconcile.Config do
   defstruct match_on: [:amount, :date],
             amount_tolerance: 0,
             date_tolerance: 0,
-            description_match: :case_insensitive
+            description_match: :case_insensitive,
+            allow_splits: false
 
   @type description_match :: :case_insensitive | :ignore
 
@@ -44,7 +46,8 @@ defmodule ExReconcile.Config do
           match_on: [atom()],
           amount_tolerance: number(),
           date_tolerance: non_neg_integer(),
-          description_match: description_match()
+          description_match: description_match(),
+          allow_splits: boolean()
         }
 
   @doc """
@@ -88,6 +91,10 @@ defmodule ExReconcile.Config do
       raise ArgumentError,
             ":description_match must be one of #{inspect(@valid_description_match)}, " <>
               "got: #{inspect(config.description_match)}"
+    end
+
+    if not is_boolean(config.allow_splits) do
+      raise ArgumentError, ":allow_splits must be a boolean, got: #{inspect(config.allow_splits)}"
     end
 
     config

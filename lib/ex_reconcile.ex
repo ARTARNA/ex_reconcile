@@ -47,6 +47,30 @@ defmodule ExReconcile do
   )
   ```
 
+  ## Split / many-to-one matching
+
+  Real-world reconciliation often involves a single bank entry that corresponds to several
+  ledger entries — for example, a bulk payment clearing three invoices at once. Enable
+  split matching with `allow_splits: true`:
+
+  ```elixir
+  # Bank has one entry of 300; ledger has three entries of 100 each.
+  ExReconcile.reconcile(bank, ledger,
+    match_on: [:amount],
+    allow_splits: true
+  )
+  # => %ExReconcile.Result{
+  #      splits: [{bank_txn_300, [ledger_txn_100a, ledger_txn_100b, ledger_txn_100c]}],
+  #      ...
+  #    }
+  ```
+
+  Split matching runs as a second pass over the transactions left unmatched after the
+  standard 1:1 phase. It first looks for a single left transaction whose amount equals the
+  sum of multiple right transactions, then looks for the reverse (multiple lefts summing to
+  one right). Matches respect `amount_tolerance`. Results are stored in `result.splits` as
+  `t:ExReconcile.Result.split_match/0` tuples and are **not** counted as unmatched.
+
   See `ExReconcile.Config` for all available options.
   """
 
@@ -55,11 +79,13 @@ defmodule ExReconcile do
   @doc """
   Reconcile two lists of transactions.
 
-  Returns an `ExReconcile.Result` with four fields:
+  Returns an `ExReconcile.Result` with five fields:
 
   - `:matched` - `[{left_txn, right_txn}]` perfectly reconciled pairs
   - `:discrepancies` - `[{left_txn, right_txn, [diff]}]` pairs that match by key but
     differ in one or more field values
+  - `:splits` - many-to-one matches found when `allow_splits: true`; see
+    `t:ExReconcile.Result.split_match/0`
   - `:unmatched_left` - transactions in `left` with no counterpart in `right`
   - `:unmatched_right` - transactions in `right` with no counterpart in `left`
 
@@ -73,6 +99,7 @@ defmodule ExReconcile do
   | `:amount_tolerance` | `0` |
   | `:date_tolerance` | `0` |
   | `:description_match` | `:case_insensitive` |
+  | `:allow_splits` | `false` |
 
   ## Examples
 

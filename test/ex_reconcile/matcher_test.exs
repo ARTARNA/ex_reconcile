@@ -280,4 +280,153 @@ defmodule ExReconcile.MatcherTest do
     result = Matcher.run([], rights, cfg())
     assert Enum.map(result.unmatched_right, & &1.amount) == [10, 20, 30]
   end
+
+  # ---------------------------------------------------------------------------
+  # Split matching (allow_splits: true)
+  # ---------------------------------------------------------------------------
+
+  describe "allow_splits: false (default)" do
+    test "unmatched entries are NOT grouped into splits" do
+      # One left of 300 vs three rights of 100 each — without splits they all stay unmatched
+      left = [t(amount: 300, date: ~D[2024-01-01])]
+
+      right = [
+        t(amount: 100, date: ~D[2024-01-01]),
+        t(amount: 100, date: ~D[2024-01-01]),
+        t(amount: 100, date: ~D[2024-01-01])
+      ]
+
+      result = Matcher.run(left, right, cfg(match_on: [:amount]))
+      assert result.splits == []
+      assert length(result.unmatched_left) == 1
+      assert length(result.unmatched_right) == 3
+    end
+  end
+
+  describe "allow_splits: true — left-anchor splits (1 left : many rights)" do
+    test "one left matches two rights that sum to its amount" do
+      left = [t(amount: 300, date: ~D[2024-01-01])]
+      right = [t(amount: 100, date: ~D[2024-01-02]), t(amount: 200, date: ~D[2024-01-03])]
+
+      result = Matcher.run(left, right, cfg(match_on: [:amount], allow_splits: true))
+
+      assert length(result.splits) == 1
+      assert result.unmatched_left == []
+      assert result.unmatched_right == []
+
+      {anchor, parts} = hd(result.splits)
+      assert anchor.amount == 300
+      assert Enum.map(parts, & &1.amount) |> Enum.sort() == [100, 200]
+    end
+
+    test "one left matches three rights that sum to its amount" do
+      left = [t(amount: 300)]
+      right = [t(amount: 100), t(amount: 100), t(amount: 100)]
+
+      result = Matcher.run(left, right, cfg(match_on: [:amount], allow_splits: true))
+
+      assert length(result.splits) == 1
+      {_anchor, parts} = hd(result.splits)
+      assert length(parts) == 3
+    end
+
+    test "1:1 pairs are resolved first; remaining unmatched are split" do
+      l1 = t(amount: 500, date: ~D[2024-01-01])
+      l2 = t(amount: 300, date: ~D[2024-01-02])
+      r1 = t(amount: 500, date: ~D[2024-01-01])
+      r2 = t(amount: 100, date: ~D[2024-01-03])
+      r3 = t(amount: 200, date: ~D[2024-01-04])
+
+      result = Matcher.run([l1, l2], [r1, r2, r3], cfg(match_on: [:amount], allow_splits: true))
+
+      assert length(result.matched) == 1
+      assert length(result.splits) == 1
+      assert result.unmatched_left == []
+      assert result.unmatched_right == []
+    end
+
+    test "left-anchor split respects amount_tolerance" do
+      # anchor = 300, parts = 99 + 200 = 299, delta = 1, tolerance = 2
+      left = [t(amount: 300)]
+      right = [t(amount: 99), t(amount: 200)]
+
+      result =
+        Matcher.run(left, right, cfg(match_on: [:amount], allow_splits: true, amount_tolerance: 2))
+
+      assert length(result.splits) == 1
+    end
+
+    test "no split when sum falls outside amount_tolerance" do
+      left = [t(amount: 300)]
+      right = [t(amount: 90), t(amount: 200)]
+
+      result =
+        Matcher.run(left, right, cfg(match_on: [:amount], allow_splits: true, amount_tolerance: 2))
+
+      assert result.splits == []
+      assert length(result.unmatched_left) == 1
+      assert length(result.unmatched_right) == 2
+    end
+  end
+
+  describe "allow_splits: true — right-anchor splits (many lefts : 1 right)" do
+    test "two lefts summing to one right form a split" do
+      left = [t(amount: 100), t(amount: 200)]
+      right = [t(amount: 300)]
+
+      result = Matcher.run(left, right, cfg(match_on: [:amount], allow_splits: true))
+
+      assert length(result.splits) == 1
+      assert result.unmatched_left == []
+      assert result.unmatched_right == []
+
+      {parts, anchor} = hd(result.splits)
+      assert anchor.amount == 300
+      assert Enum.map(parts, & &1.amount) |> Enum.sort() == [100, 200]
+    end
+  end
+
+  describe "allow_splits: true — no double-use of transactions" do
+    test "a transaction used in a 1:1 match is not reused in a split" do
+      # l1 matches r1 exactly; l2 + r2 could superficially look like parts of l1 too
+      l1 = t(id: "A", amount: 300)
+      l2 = t(id: "B", amount: 150)
+      r1 = t(id: "A", amount: 300)
+      r2 = t(id: "C", amount: 150)
+
+      result =
+        Matcher.run([l1, l2], [r1, r2], cfg(match_on: [:id], allow_splits: true))
+
+      assert length(result.matched) == 1
+      # l2 and r2 each stay unmatched; they don't form a split (only 2 single txns left,
+      # neither side has a 1-vs-2 group)
+      assert length(result.unmatched_left) == 1
+      assert length(result.unmatched_right) == 1
+      assert result.splits == []
+    end
+
+    test "each transaction appears in at most one split group" do
+      # Two left-anchor splits: l1=300 → {r1=100, r2=200}, l2=250 → {r3=100, r4=150}
+      l1 = t(id: "l1", amount: 300)
+      l2 = t(id: "l2", amount: 250)
+      r1 = t(id: "r1", amount: 100)
+      r2 = t(id: "r2", amount: 200)
+      r3 = t(id: "r3", amount: 100)
+      r4 = t(id: "r4", amount: 150)
+
+      result =
+        Matcher.run([l1, l2], [r1, r2, r3, r4], cfg(match_on: [:amount], allow_splits: true))
+
+      assert length(result.splits) == 2
+      assert result.unmatched_left == []
+      assert result.unmatched_right == []
+
+      # Collect all right-side IDs used across both splits — no ID should appear twice
+      all_part_ids =
+        Enum.flat_map(result.splits, fn {_anchor, parts} -> Enum.map(parts, & &1.id) end)
+
+      assert length(all_part_ids) == length(Enum.uniq(all_part_ids))
+      assert Enum.sort(all_part_ids) == ["r1", "r2", "r3", "r4"]
+    end
+  end
 end
